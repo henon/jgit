@@ -79,6 +79,11 @@ public final class AlternateRepositoryDatabase extends ObjectDatabase {
 	}
 
 	@Override
+	public DatabaseInserter newInserter() {
+		return odb.newInserter();
+	}
+
+	@Override
 	public boolean exists() {
 		return odb.exists();
 	}

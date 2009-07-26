@@ -115,7 +115,6 @@ public class Repository {
 	public Repository(final File d) throws IOException {
 		gitDir = d.getAbsoluteFile();
 		refs = new RefDatabase(this);
-		objectDatabase = new ObjectDirectory(FS.resolve(gitDir, "objects"));
 
 		final FileBasedConfig userConfig;
 		userConfig = SystemReader.getInstance().openUserConfig();
@@ -129,6 +128,7 @@ public class Repository {
 			throw e2;
 		}
 		config = new RepositoryConfig(userConfig, FS.resolve(gitDir, "config"));
+		objectDatabase = new ObjectDirectory(config, FS.resolve(gitDir, "objects"));
 
 		if (objectDatabase.exists()) {
 			try {

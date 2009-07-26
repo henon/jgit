@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2007, Robin Rosenberg <robin.rosenberg@dewire.com>
  * Copyright (C) 2008, Shawn O. Pearce <spearce@spearce.org>
+ * Copyright (C) 2009, Google Inc.
  *
  * All rights reserved.
  *
@@ -38,51 +39,46 @@
 
 package org.spearce.jgit.lib;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStreamWriter;
-import java.security.MessageDigest;
-import java.util.zip.Deflater;
-import java.util.zip.DeflaterOutputStream;
-
-import org.spearce.jgit.errors.ObjectWritingException;
 
 /**
  * A class for writing loose objects.
  */
-public class ObjectWriter {
-	private static final byte[] htree = Constants.encodeASCII("tree");
-
-	private static final byte[] hparent = Constants.encodeASCII("parent");
-
-	private static final byte[] hauthor = Constants.encodeASCII("author");
-
-	private static final byte[] hcommitter = Constants.encodeASCII("committer");
-
-	private static final byte[] hencoding = Constants.encodeASCII("encoding");
-
-	private final Repository r;
-
-	private final byte[] buf;
-
-	private final MessageDigest md;
-
-	private final Deflater def;
+public class ObjectWriter extends DatabaseInserter {
+	private final DatabaseInserter inserter;
 
 	/**
 	 * Construct an Object writer for the specified repository
 	 * @param d
 	 */
 	public ObjectWriter(final Repository d) {
-		r = d;
-		buf = new byte[8192];
-		md = Constants.newMessageDigest();
-		def = new Deflater(r.getConfig().getCore().getCompression());
+		inserter = d.getObjectDatabase().newInserter();
+	}
+
+	@Override
+	public ObjectId insert(int type, byte[] data, int off, int len)
+			throws IOException {
+		return inserter.insert(type, data, off, len);
+	}
+
+	@Override
+	public ObjectId insert(int type, long len, InputStream in)
+			throws IOException {
+		return inserter.insert(type, len, in);
+	}
+
+	@Override
+	public ObjectId idFor(int type, byte[] data, int off, int len) {
+		return inserter.idFor(type, data, off, len);
+	}
+
+	@Override
+	public ObjectId idFor(int type, long len, InputStream in)
+			throws IOException {
+		return inserter.idFor(type, len, in);
 	}
 
 	/**
@@ -93,7 +89,7 @@ public class ObjectWriter {
 	 * @throws IOException
 	 */
 	public ObjectId writeBlob(final byte[] b) throws IOException {
-		return writeBlob(b.length, new ByteArrayInputStream(b));
+		return insert(Constants.OBJ_BLOB, b);
 	}
 
 	/**
@@ -125,7 +121,7 @@ public class ObjectWriter {
 	 */
 	public ObjectId writeBlob(final long len, final InputStream is)
 			throws IOException {
-		return writeObject(Constants.OBJ_BLOB, len, is, true);
+		return insert(Constants.OBJ_BLOB, len, is);
 	}
 
 	/**
@@ -137,25 +133,7 @@ public class ObjectWriter {
 	 * @throws IOException
 	 */
 	public ObjectId writeTree(final Tree t) throws IOException {
-		final ByteArrayOutputStream o = new ByteArrayOutputStream();
-		final TreeEntry[] items = t.members();
-		for (int k = 0; k < items.length; k++) {
-			final TreeEntry e = items[k];
-			final ObjectId id = e.getId();
-
-			if (id == null)
-				throw new ObjectWritingException("Object at path \""
-						+ e.getFullName() + "\" does not have an id assigned."
-						+ "  All object ids must be assigned prior"
-						+ " to writing a tree.");
-
-			e.getMode().copyTo(o);
-			o.write(' ');
-			o.write(e.getNameUTF8());
-			o.write(0);
-			id.copyRawTo(o);
-		}
-		return writeCanonicalTree(o.toByteArray());
+		return inserter.insert(t);
 	}
 
 	/**
@@ -167,12 +145,7 @@ public class ObjectWriter {
 	 * @throws IOException
 	 */
 	public ObjectId writeCanonicalTree(final byte[] b) throws IOException {
-		return writeTree(b.length, new ByteArrayInputStream(b));
-	}
-
-	private ObjectId writeTree(final long len, final InputStream is)
-			throws IOException {
-		return writeObject(Constants.OBJ_TREE, len, is, true);
+		return insert(Constants.OBJ_TREE, b);
 	}
 
 	/**
@@ -184,53 +157,7 @@ public class ObjectWriter {
 	 * @throws IOException
 	 */
 	public ObjectId writeCommit(final Commit c) throws IOException {
-		final ByteArrayOutputStream os = new ByteArrayOutputStream();
-		String encoding = c.getEncoding();
-		if (encoding == null)
-			encoding = Constants.CHARACTER_ENCODING;
-		final OutputStreamWriter w = new OutputStreamWriter(os, encoding);
-
-		os.write(htree);
-		os.write(' ');
-		c.getTreeId().copyTo(os);
-		os.write('\n');
-
-		ObjectId[] ps = c.getParentIds();
-		for (int i=0; i<ps.length; ++i) {
-			os.write(hparent);
-			os.write(' ');
-			ps[i].copyTo(os);
-			os.write('\n');
-		}
-
-		os.write(hauthor);
-		os.write(' ');
-		w.write(c.getAuthor().toExternalString());
-		w.flush();
-		os.write('\n');
-
-		os.write(hcommitter);
-		os.write(' ');
-		w.write(c.getCommitter().toExternalString());
-		w.flush();
-		os.write('\n');
-
-		if (!encoding.equals(Constants.CHARACTER_ENCODING)) {
-			os.write(hencoding);
-			os.write(' ');
-			os.write(Constants.encodeASCII(encoding));
-			os.write('\n');
-		}
-
-		os.write('\n');
-		w.write(c.getMessage());
-		w.flush();
-
-		return writeCommit(os.toByteArray());
-	}
-
-	private ObjectId writeTag(final byte[] b) throws IOException {
-		return writeTag(b.length, new ByteArrayInputStream(b));
+		return inserter.insert(c);
 	}
 
 	/**
@@ -242,45 +169,7 @@ public class ObjectWriter {
 	 * @throws IOException
 	 */
 	public ObjectId writeTag(final Tag c) throws IOException {
-		final ByteArrayOutputStream os = new ByteArrayOutputStream();
-		final OutputStreamWriter w = new OutputStreamWriter(os,
-				Constants.CHARSET);
-
-		w.write("object ");
-		c.getObjId().copyTo(w);
-		w.write('\n');
-
-		w.write("type ");
-		w.write(c.getType());
-		w.write("\n");
-
-		w.write("tag ");
-		w.write(c.getTag());
-		w.write("\n");
-
-		w.write("tagger ");
-		w.write(c.getAuthor().toExternalString());
-		w.write('\n');
-
-		w.write('\n');
-		w.write(c.getMessage());
-		w.close();
-
-		return writeTag(os.toByteArray());
-	}
-
-	private ObjectId writeCommit(final byte[] b) throws IOException {
-		return writeCommit(b.length, new ByteArrayInputStream(b));
-	}
-
-	private ObjectId writeCommit(final long len, final InputStream is)
-			throws IOException {
-		return writeObject(Constants.OBJ_COMMIT, len, is, true);
-	}
-
-	private ObjectId writeTag(final long len, final InputStream is)
-		throws IOException {
-		return writeObject(Constants.OBJ_TAG, len, is, true);
+		return inserter.insert(c);
 	}
 
 	/**
@@ -294,113 +183,6 @@ public class ObjectWriter {
 	 */
 	public ObjectId computeBlobSha1(final long len, final InputStream is)
 			throws IOException {
-		return writeObject(Constants.OBJ_BLOB, len, is, false);
-	}
-
-	ObjectId writeObject(final int type, long len, final InputStream is,
-			boolean store) throws IOException {
-		final File t;
-		final DeflaterOutputStream deflateStream;
-		final FileOutputStream fileStream;
-		ObjectId id = null;
-
-		if (store) {
-			t = File.createTempFile("noz", null, r.getObjectsDirectory());
-			fileStream = new FileOutputStream(t);
-		} else {
-			t = null;
-			fileStream = null;
-		}
-
-		md.reset();
-		if (store) {
-			def.reset();
-			deflateStream = new DeflaterOutputStream(fileStream, def);
-		} else
-			deflateStream = null;
-
-		try {
-			byte[] header;
-			int n;
-
-			header = Constants.encodedTypeString(type);
-			md.update(header);
-			if (deflateStream != null)
-				deflateStream.write(header);
-
-			md.update((byte) ' ');
-			if (deflateStream != null)
-				deflateStream.write((byte) ' ');
-
-			header = Constants.encodeASCII(len);
-			md.update(header);
-			if (deflateStream != null)
-				deflateStream.write(header);
-
-			md.update((byte) 0);
-			if (deflateStream != null)
-				deflateStream.write((byte) 0);
-
-			while (len > 0
-					&& (n = is.read(buf, 0, (int) Math.min(len, buf.length))) > 0) {
-				md.update(buf, 0, n);
-				if (deflateStream != null)
-					deflateStream.write(buf, 0, n);
-				len -= n;
-			}
-
-			if (len != 0)
-				throw new IOException("Input did not match supplied length. "
-						+ len + " bytes are missing.");
-
-			if (deflateStream != null ) {
-				deflateStream.close();
-				if (t != null)
-					t.setReadOnly();
-			}
-
-			id = ObjectId.fromRaw(md.digest());
-		} finally {
-			if (id == null && deflateStream != null) {
-				try {
-					deflateStream.close();
-				} finally {
-					t.delete();
-				}
-			}
-		}
-
-		if (t == null)
-			return id;
-
-		if (r.hasObject(id)) {
-			// Object is already in the repository so remove
-			// the temporary file.
-			//
-			t.delete();
-		} else {
-			final File o = r.toFile(id);
-			if (!t.renameTo(o)) {
-				// Maybe the directory doesn't exist yet as the object
-				// directories are always lazily created. Note that we
-				// try the rename first as the directory likely does exist.
-				//
-				o.getParentFile().mkdir();
-				if (!t.renameTo(o)) {
-					if (!r.hasObject(id)) {
-						// The object failed to be renamed into its proper
-						// location and it doesn't exist in the repository
-						// either. We really don't know what went wrong, so
-						// fail.
-						//
-						t.delete();
-						throw new ObjectWritingException("Unable to"
-								+ " create new object: " + o);
-					}
-				}
-			}
-		}
-
-		return id;
+		return inserter.idFor(Constants.OBJ_BLOB, len, is);
 	}
 }
